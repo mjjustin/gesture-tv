@@ -11,7 +11,7 @@ android {
         targetSdk 34
         versionCode 15
         versionName "1.0"
-        ndk { abiFilters 'armeabi-v7a' }   // the TV is 32-bit only
+        ndk { abiFilters 'armeabi-v7a', 'arm64-v8a' }   // 32-bit TVs (e.g. Philips MT5895) + 64-bit TVs
     }
     androidResources { noCompress += "task" }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }

@@ -81,7 +81,12 @@ python3 tools/gesturetv.py --tv 192.168.1.50 check
 Accept the **"Allow debugging?"** prompt on the TV (tick "always allow"). You want ✅ for USB host and
 external camera, and `Number of camera devices: 1`.
 
-### 3. Build the app
+### 3. Get the app
+
+**Easiest:** use the ready-made APK in [`release/`](release/), which works on 32-bit and 64-bit TVs, and skip to step 4.
+In step 5 add `--apk release/GestureTV-1.0.apk`.
+
+**Or build it yourself:**
 
 ```bash
 ./gradlew assembleDebug
@@ -103,6 +108,8 @@ This writes `config.json` with the pairing key. **Keep that file private** (it's
 
 ```bash
 python3 tools/gesturetv.py --tv 192.168.1.50 install
+# using the ready-made APK instead of your own build:
+python3 tools/gesturetv.py --tv 192.168.1.50 --apk release/GestureTV-1.0.apk install
 ```
 
 This installs the APK, grants its permissions (camera, display over other apps, usage access), copies `config.json` to the TV and starts it.

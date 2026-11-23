@@ -3,6 +3,7 @@ build/
 app/build/
 .gradle/
 *.apk
+!release/*.apk
 local.properties
 .idea/
 *.iml
