@@ -1,0 +1,23 @@
+{
+  "tv": {
+    "host": "127.0.0.1",
+    "user": "",
+    "password": ""
+  },
+
+  "armHoldSeconds": 1.0,
+  "activeSeconds": 10,
+  "mirrorCamera": true,
+  "homeLauncherPackage": "",
+
+  "shortcuts": {
+    "twoFingers":   { "name": "Netflix", "package": "com.netflix.ninja" },
+    "threeFingers": { "name": "YouTube", "package": "com.google.android.youtube.tv" }
+  },
+
+  "kidsTimer": {
+    "minutes": 5,
+    "startMessage": "Only {minutes} minutes left of TV time!",
+    "endMessage": "TV time is over!\nTime to switch off 😊"
+  }
+}

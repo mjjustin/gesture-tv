@@ -1,0 +1,16 @@
+# build output
+build/
+app/build/
+.gradle/
+*.apk
+local.properties
+.idea/
+*.iml
+.DS_Store
+
+# your TV's pairing key and settings — never commit
+config.json
+jointspace.json
+
+# downloaded at build time
+app/src/main/assets/gesture_recognizer.task
