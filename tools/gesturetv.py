@@ -16,7 +16,7 @@ PKG = "app.gesturetv"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG = os.path.join(ROOT, "config.json")
 EXAMPLE = os.path.join(ROOT, "config.example.json")
-VERSION = "1.1"
+VERSION = "1.2"
 BUILD_DIR = os.path.join(ROOT, "app", "build", "outputs", "apk", "debug")
 RELEASE_DIR = os.path.join(ROOT, "release")
 REMOTE_DIR = f"/sdcard/Android/data/{PKG}/files"
@@ -147,13 +147,13 @@ def cmd_install(tv, apk):
     print(f"Installing {os.path.relpath(apk, ROOT)}")
     adb(s, "install", "-r", apk)
     adb(s, "shell", "pm", "grant", PKG, "android.permission.CAMERA")
-    adb(s, "shell", "pm", "grant", PKG, "android.permission.RECORD_AUDIO")    # "Jarvis" voice commands
+    adb(s, "shell", "pm", "grant", PKG, "android.permission.RECORD_AUDIO")    # "Hello Jarvis" voice commands
     adb(s, "shell", "appops", "set", PKG, "SYSTEM_ALERT_WINDOW", "allow")   # status icon + messages + app shortcuts
     adb(s, "shell", "appops", "set", PKG, "GET_USAGE_STATS", "allow")       # show ✋ icon only on the home screen
     push_config(s)
     restart(s)
     print("Installed and started. Hold an open palm in front of the camera for 1 s to begin.\n"
-          "The first start downloads the voice model (~40 MB), so 'Jarvis' works a minute later.")
+          "The first start downloads the voice model (~40 MB), so 'Hello Jarvis' works a minute later.")
 
 
 def cmd_config(tv):

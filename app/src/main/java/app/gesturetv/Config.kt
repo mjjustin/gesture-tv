@@ -32,7 +32,11 @@ data class Config(
     val timerEndMessage: String = "TV time is over!\nTime to switch off 😊",
     /** "always" = listen for "Jarvis" all the time, "dark" = only when the camera sees a dark room, "off". */
     val wakeWord: String = "always",
-    /** How long to wait for a command after "Jarvis". */
+    /** What to say to wake it. Two words are much harder for TV sound to hit by accident. */
+    val wakePhrases: List<String> = listOf("hello jarvis"),
+    /** Recogniser confidence (0..1) needed for the wake phrase; higher = fewer false wake-ups. */
+    val wakeConfidence: Double = 0.9,
+    /** How long to wait for a command after "Hello Jarvis". */
     val listenMs: Long = 5000,
     /** Volume steps per "volume up" / "volume down". */
     val volumeSteps: Int = 3,
@@ -87,6 +91,10 @@ data class Config(
                 timerStartMessage = timer.optString("startMessage", d.timerStartMessage),
                 timerEndMessage = timer.optString("endMessage", d.timerEndMessage),
                 wakeWord = voice.optString("wakeWord", d.wakeWord),
+                wakePhrases = voice.optJSONArray("wakePhrases")?.let { a ->
+                    (0 until a.length()).map { a.getString(it).lowercase().trim() }.filter { it.isNotEmpty() }
+                }?.ifEmpty { null } ?: d.wakePhrases,
+                wakeConfidence = voice.optDouble("wakeConfidence", d.wakeConfidence),
                 listenMs = (voice.optDouble("listenSeconds", d.listenMs / 1000.0) * 1000).toLong(),
                 volumeSteps = voice.optInt("volumeSteps", d.volumeSteps),
                 duckPercent = voice.optInt("duckPercent", d.duckPercent).coerceIn(0, 100),

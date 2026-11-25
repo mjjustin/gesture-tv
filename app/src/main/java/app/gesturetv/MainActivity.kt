@@ -48,7 +48,7 @@ class MainActivity : Activity() {
                 👎  Thumbs down (hold 1 s) → mute / unmute
                 ☝  1 finger → Home     ✌  2 fingers → ${c.twoFingers.name}     3 fingers → ${c.threeFingers.name}
                 👍  Thumbs up (hold 2 s) → kids' ${c.timerMinutes}-minute timer (again = cancel)
-                🎤  Say "Jarvis" (or raise your palm) → TV turns down → say: volume up · mute · pause · play ·
+                🎤  Say "${c.wakePhrases.first().split(" ").joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } }}" (or raise your palm) → TV turns down → say: volume up · mute · pause · play ·
                      open ${c.twoFingers.spoken} · open ${c.threeFingers.spoken} · go home · go back · left/right/up/down · ok/open · ${c.timerMinutes} minutes left
                      Keep going: several commands in a row work ("right… right… open"); "thank you" ends
             """.trimIndent()

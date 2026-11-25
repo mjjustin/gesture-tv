@@ -9,8 +9,8 @@ android {
         applicationId "app.gesturetv"
         minSdk 26
         targetSdk 34
-        versionCode 16
-        versionName "1.1"
+        versionCode 17
+        versionName "1.2"
     }
     androidResources { noCompress += "task" }
     // One APK per CPU type keeps each download ~60 MB (MediaPipe + Vosk native libs are large).

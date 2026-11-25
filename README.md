@@ -2,7 +2,7 @@
 
 Control an Android TV with hand gestures and voice commands, using a USB webcam (with a built-in mic) plugged into the TV.
 Change the volume by moving your hand up and down in the air, browse the home screen with an open palm,
-open Netflix or YouTube with a finger count, say *"Jarvis, pause"* when it's too dark to see your hand,
+open Netflix or YouTube with a finger count, say *"Hello Jarvis, pause"* when it's too dark to see your hand,
 and show the kids a "5 minutes of TV left" countdown.
 
 Everything runs **on the TV itself**: hand tracking is Google's [MediaPipe](https://ai.google.dev/edge/mediapipe/solutions/vision/gesture_recognizer)
@@ -41,12 +41,12 @@ Open the **GestureTV** app on the TV to see the live camera view with your hand'
 
 Works with any webcam that has a microphone. Handy in a dark room, where the camera can't see your hand.
 
-- Say **"Jarvis"** (or "Hey Jarvis" / "Hello Jarvis"). The TV **turns down** to 30% so it can hear you, and the corner shows 🎤 listening….
-- Then say one or more commands. Each command gives you another 5 seconds, so *"Jarvis … right … right … open"* works.
-  You can also say it in one breath: *"Jarvis, pause"*.
+- Say **"Hello Jarvis"**. The TV **turns down** to 30% so it can hear you, and the corner shows 🎤 listening….
+- Then say one or more commands. Each command gives you another 5 seconds, so *"Hello Jarvis … right … right … open"* works.
+  You can also say it in one breath: *"Hello Jarvis, pause"*.
 - The volume goes back to where it was when you stop talking, when you say **"thank you"**, or straight away when you **open an app**,
   so the show's own sound can't trigger anything.
-- **Palm up** switches on gestures **and** voice together (✋ 🎤): no "Jarvis" needed until gestures switch off or you open an app.
+- **Palm up** switches on gestures **and** voice together (✋ 🎤): no "Hello Jarvis" needed until gestures switch off or you open an app.
 
 | Say | Does |
 |---|---|
@@ -60,7 +60,10 @@ Works with any webcam that has a microphone. Handy in a dark room, where the cam
 | five minutes left · start timer · cancel timer | Kids' timer |
 | thank you · stop listening | Stop listening now |
 
-Commands without "Jarvis" are ignored (unless your palm is up), so people talking on TV don't change anything.
+Commands without "Hello Jarvis" are ignored (unless your palm is up), so people talking on TV don't change anything.
+The wake phrase is two words on purpose: a single word like "Jarvis" was triggered by TV dialogue every few seconds.
+Besides the commands, the recogniser knows ~150 everyday words, so other speech lands on those and is ignored,
+and a wake phrase it isn't sure about (confidence below 0.9) is rejected.
 The speech model (~40 MB) is downloaded once, the first time the app starts; after that it works offline.
 
 ---
@@ -137,8 +140,8 @@ picks the right one for your TV automatically. Skip to step 4.
 
 | File | For |
 |---|---|
-| [GestureTV-1.1-armeabi-v7a.apk](https://github.com/mjjustin/gesture-tv/raw/main/release/GestureTV-1.1-armeabi-v7a.apk) (31 MB) | **Almost every TV.** Most TVs run 32-bit apps, even with a 64-bit chip |
-| [GestureTV-1.1-arm64-v8a.apk](https://github.com/mjjustin/gesture-tv/raw/main/release/GestureTV-1.1-arm64-v8a.apk) (37 MB) | TVs that only run 64-bit apps |
+| [GestureTV-1.2-armeabi-v7a.apk](https://github.com/mjjustin/gesture-tv/raw/main/release/GestureTV-1.2-armeabi-v7a.apk) (31 MB) | **Almost every TV.** Most TVs run 32-bit apps, even with a 64-bit chip |
+| [GestureTV-1.2-arm64-v8a.apk](https://github.com/mjjustin/gesture-tv/raw/main/release/GestureTV-1.2-arm64-v8a.apk) (37 MB) | TVs that only run 64-bit apps |
 
 The links are for downloading without git. The installer and an `adb install` both work with them.
 
@@ -167,11 +170,11 @@ This writes `config.json` with the pairing key. **Keep that file private** (it's
 ```bash
 python3 tools/gesturetv.py --tv 192.168.1.50 install
 # or a specific APK, e.g. one you downloaded:
-python3 tools/gesturetv.py --tv 192.168.1.50 --apk ~/Downloads/GestureTV-1.1-armeabi-v7a.apk install
+python3 tools/gesturetv.py --tv 192.168.1.50 --apk ~/Downloads/GestureTV-1.2-armeabi-v7a.apk install
 ```
 
 This installs the APK, grants its permissions (camera, microphone, display over other apps, usage access), copies `config.json` to the TV and starts it.
-Hold up an open palm, or wait a minute for the speech model to download and say "Jarvis". 🎉
+Hold up an open palm, or wait a minute for the speech model to download and say "Hello Jarvis". 🎉
 
 **After the TV restarts**, open GestureTV once from the home screen to start it again.
 
@@ -198,9 +201,11 @@ python3 tools/gesturetv.py --tv 192.168.1.50 config
 | `kidsTimer.startMessage` | "Only {minutes} minutes left of TV time!" | `{minutes}` is replaced |
 | `kidsTimer.endMessage` | "TV time is over! …" | Stays on screen until cancelled with 👍 |
 | `shortcuts.*.spoken` | the app name | What to say to open it, e.g. `"youtube"` for a YouTube alternative |
-| `voice.wakeWord` | `"always"` | `"always"`: listen for "Jarvis" all the time; `"dark"`: only when the room is dark; `"off"` |
-| `voice.withPalm` | `true` | Palm up also switches on voice commands (no "Jarvis" needed) |
-| `voice.listenSeconds` | `5` | How long to wait for (the next) command after "Jarvis" |
+| `voice.wakeWord` | `"always"` | `"always"`: listen for the wake phrase all the time; `"dark"`: only when the room is dark; `"off"` |
+| `voice.wakePhrases` | `["hello jarvis"]` | What to say to wake it. Use two or more words |
+| `voice.wakeConfidence` | `0.9` | 0–1. Higher = fewer false wake-ups; lower it if it often misses you |
+| `voice.withPalm` | `true` | Palm up also switches on voice commands (no wake phrase needed) |
+| `voice.listenSeconds` | `5` | How long to wait for (the next) command after the wake phrase |
 | `voice.duckPercent` | `30` | Turn the TV down to this % while listening. `0` = mute, `100` = don't change |
 | `voice.volumeSteps` | `3` | Steps per "volume up" / "volume down" |
 
@@ -220,9 +225,9 @@ adb -s 192.168.1.50:5555 shell pm list packages | grep -i youtube
 - **`adb` says "No route to host" on macOS** while `ping` works: System Settings → Privacy & Security → **Local Network** → toggle your terminal app off and on, quit the terminal fully, reopen.
 - **Arrow keys do nothing:** not paired (Philips only). Run `pair`, then `config`.
 - **Left/right are swapped:** set `"mirrorCamera": false`.
-- **"Jarvis" does nothing:** check the log for `voice ready (mic: …)`. If the model download failed (no internet), restart the app.
+- **"Hello Jarvis" does nothing:** check the log for `voice ready (mic: …)`. If the model download failed (no internet), restart the app.
   Speak towards the camera; from a sofa 3 m away a normal voice is enough once the TV turns down.
-- **Voice triggers by itself:** use `"wakeWord": "dark"` or `"off"`, and keep `withPalm`.
+- **Voice triggers by itself:** raise `wakeConfidence` (e.g. 0.95), or use `"wakeWord": "dark"` or `"off"`, and keep `withPalm`.
 
 ## Performance
 

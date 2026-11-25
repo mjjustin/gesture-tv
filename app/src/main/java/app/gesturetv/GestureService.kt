@@ -470,7 +470,7 @@ class GestureService : LifecycleService() {
         Thread {
             val dir = VoskModel.prepare(this) { event(it) }
             if (dir == null) { event("voice off: voice model not available (no internet on first start?)"); return@Thread }
-            val v = VoiceControl(this, dir, voicePhrases(), cfg.listenMs,
+            val v = VoiceControl(this, dir, voicePhrases(), cfg.listenMs, cfg.wakePhrases, cfg.wakeConfidence,
                 wakeEnabled = { screenOn && (cfg.wakeWord == "always" || (cfg.wakeWord == "dark" && brightness < 45)) },
                 commandMode = { screenOn && palmVoice(SystemClock.uptimeMillis()) },
                 listener = object : VoiceControl.Listener {

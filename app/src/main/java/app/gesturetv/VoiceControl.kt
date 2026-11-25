@@ -21,8 +21,8 @@ import java.io.File
  * Offline voice commands with a wake word, using Vosk restricted to a fixed phrase list
  * (a small grammar is far more accurate than free dictation, and cheap enough for a TV).
  *
- *  "Jarvis" / "Hey Jarvis" / "Hello Jarvis"  → onWake() (the service mutes the TV), then every
- *  recognised phrase → onCommand(). Each command restarts the listenMs window, so "Jarvis … right …
+ *  "Hello Jarvis" → onWake() (the service turns the TV down), then every
+ *  recognised phrase → onCommand(). The wake phrases come from the config (default "hello jarvis"). Each command restarts the listenMs window, so "Jarvis … right …
  *  right … ok" works; "thank you" ends it early. "Jarvis, pause" in one breath also works.
  *  Command phrases heard WITHOUT the wake word are ignored (so dialogue on TV can't trigger actions),
  *  except while commandMode() is true, i.e. after a palm switched gestures on.
@@ -33,6 +33,10 @@ class VoiceControl(
     /** spoken phrase → command id */
     private val phrases: Map<String, String>,
     private val listenMs: Long,
+    /** Wake phrases, e.g. "hello jarvis". Two words are much harder to hit by accident than one. */
+    private val wakePhrases: List<String>,
+    /** Minimum recogniser confidence (0..1) for the wake phrase's words. */
+    private val wakeConfidence: Double,
     /** Whether the wake word should be listened for right now (e.g. only when dark). */
     private val wakeEnabled: () -> Boolean,
     /** True while commands are accepted without the wake word (gestures switched on with a palm). */
@@ -47,7 +51,19 @@ class VoiceControl(
     }
 
     companion object {
-        val WAKE = listOf("hey jarvis", "hello jarvis", "okay jarvis", "jarvis")
+        /**
+         * Everyday words added to the grammar. Without them, any TV dialogue is forced into the nearest
+         * command or wake phrase; with them, it lands on these words instead and is ignored.
+         */
+        val FILLER = """
+            a about after all also am an and any are as at be because been but by can come could day did do
+            does don't even every first for from get give good got great had has have he her here him his how
+            i if in into is it its just know like look make man many me more most much my new no not now of
+            on one only or other our out over people really said say see she so some take tell than that the
+            their them then there these they thing think this time to two us very want was way we well went
+            were what when where which who why will with work would yeah year yes you your
+            hi hello hey jar jarred jars service nervous harvest marvel davis travis
+        """.split(Regex("\\s+")).filter { it.isNotBlank() }
         const val RATE = 16000
         /** Chunk loudness (RMS) above which the recogniser runs. Room silence is ~50–300 on the StreamCam. */
         const val SPEECH_RMS = 500.0
@@ -83,8 +99,9 @@ class VoiceControl(
     private fun loop() {
         LibVosk.setLogLevel(LogLevel.WARNINGS)
         val model = Model(modelDir.path)
-        val grammar = JSONArray((WAKE + phrases.keys + "[unk]").distinct()).toString()
+        val grammar = JSONArray((wakePhrases + phrases.keys + FILLER + "[unk]").distinct()).toString()
         val rec = Recognizer(model, RATE.toFloat(), grammar).also { this.rec = it }
+        rec.setWords(true)              // per-word confidence, to reject unsure wake words
 
         val am = ctx.getSystemService(AudioManager::class.java)
         val usb = am.getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull {
@@ -141,31 +158,37 @@ class VoiceControl(
                 fed++
                 if (now - statT > 60_000) { listener.log("voice: analysed ${fed * 100 / maxOf(1, fed + skipped)}% of the last minute"); fed = 0; skipped = 0; statT = now }
 
-                if (rec.acceptWaveForm(buf, n)) {
-                    handle(text(rec.result), now)
-                } else if (!listening) {
-                    // React to the wake word as soon as it's heard, so the TV mutes before the command.
-                    val partial = JSONObject(rec.partialResult).optString("partial")
-                    if (partial.contains("jarvis")) startListening(now)
-                }
+                if (rec.acceptWaveForm(buf, n)) handle(rec.result, now)
             }
         } finally {
             ar.stop(); ar.release(); aec?.release(); ns?.release(); rec.close(); model.close()
         }
     }
 
-    private fun text(json: String) = JSONObject(json).optString("text").replace("[unk]", "").trim()
+    private data class Word(val w: String, val conf: Double)
 
-    private fun handle(heard: String, now: Long) {
+    private fun handle(json: String, now: Long) {
+        val o = JSONObject(json)
+        val heard = o.optString("text").replace("[unk]", "").trim()
         if (heard.isEmpty()) return
+        val arr = o.optJSONArray("result")
+        val words = (0 until (arr?.length() ?: 0)).map { arr!!.getJSONObject(it) }
+            .map { Word(it.optString("word"), it.optDouble("conf", 1.0)) }
+
         var rest = heard
-        val i = heard.lastIndexOf("jarvis")
-        if (i >= 0) {
-            if (!listening) startListening(now)
-            rest = heard.substring(i + "jarvis".length).trim()
-            if (rest.isEmpty()) return            // just the wake word: wait for the command
+        val wake = findWake(words)
+        if (wake != null) {
+            val (end, conf) = wake
+            if (conf < wakeConfidence) {
+                listener.log("voice: ignored \"$heard\" (unsure, ${"%.2f".format(conf)})")
+                if (!listening && !commandMode()) return
+            } else if (!listening) {
+                startListening(now)
+            }
+            rest = words.drop(end).joinToString(" ") { it.w }.replace("[unk]", "").trim()
+            if (rest.isEmpty()) return            // just the wake phrase: wait for the command
         } else if (!listening && !commandMode()) {
-            return                                 // no wake word: ignore (could be the TV talking)
+            return                                 // no wake phrase: ignore (could be the TV talking)
         }
         // Several commands can be said in one go ("right right ok"); run them in order.
         val said = pattern.findAll(rest).map { it.value }.toList()
@@ -185,6 +208,19 @@ class VoiceControl(
         Regex("\\b(" + phrases.keys.sortedByDescending { it.length }.joinToString("|") { Regex.escape(it) } + ")\\b")
     }
     private var gotCommand = false
+
+    /** Last wake phrase in the words: index just after it, and the lowest word confidence in it. */
+    private fun findWake(words: List<Word>): Pair<Int, Double>? {
+        var best: Pair<Int, Double>? = null
+        for (p in wakePhrases) {
+            val pw = p.split(" ")
+            for (i in 0..words.size - pw.size) {
+                if ((pw.indices).all { words[i + it].w == pw[it] })
+                    best = Pair(i + pw.size, (pw.indices).minOf { words[i + it].conf })
+            }
+        }
+        return best
+    }
 
     private fun startListening(now: Long) {
         listenUntil = now + listenMs

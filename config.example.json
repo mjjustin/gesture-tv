@@ -25,6 +25,10 @@
   },
   "voice": {
     "wakeWord": "always",
+    "wakePhrases": [
+      "hello jarvis"
+    ],
+    "wakeConfidence": 0.9,
     "listenSeconds": 5,
     "volumeSteps": 3,
     "duckPercent": 30,
