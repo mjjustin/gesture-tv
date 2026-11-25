@@ -7,7 +7,7 @@ enum class Action(val label: String) {
     UP("⬆"), DOWN("⬇"), LEFT("⬅"), RIGHT("➡"),
     OK("✊ OK"), BACK("✌ Back"), HOME("🏠 Home"),
     APP2("▶"), APP3("▶"),   // finger-count shortcuts; names come from config.json
-    TIMER("⏰"),
+    TIMER("⏰"), PAUSE("⏸ Pause"), PLAY("▶ Play"),
 }
 
 /** One analysed camera frame. cx/cy = palm centre, normalised 0..1 in image coordinates. */
@@ -41,6 +41,8 @@ class GestureEngine(
     }
 
     @Volatile var armedUntil = 0L
+    /** When gestures were last switched on with a palm (changes once per "session"). */
+    @Volatile var armedAt = 0L
         private set
 
     fun armed(now: Long) = now < armedUntil
@@ -70,6 +72,7 @@ class GestureEngine(
         if (!armed(now)) {
             if (stableLabel == "Open_Palm" && held >= armHoldMs && still(now, 300)) {
                 armedUntil = now + armMs
+                armedAt = now
                 firedForStable = true
             }
             return

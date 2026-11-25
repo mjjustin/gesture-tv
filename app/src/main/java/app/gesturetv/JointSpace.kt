@@ -1,6 +1,7 @@
 package app.gesturetv
 
 import android.util.Log
+import org.json.JSONObject
 import java.io.IOException
 import java.net.URL
 import java.security.MessageDigest
@@ -35,39 +36,55 @@ class JointSpace(private val host: String, private val user: String, private val
         """{"intent":{"component":{"packageName":"$pkg","className":"$cls"},"action":"android.intent.action.MAIN"}}"""
     )
 
+    data class Volume(val muted: Boolean, val current: Int)
+
+    fun getVolume(): Volume? {
+        val (code, body) = request("GET", "/6/audio/volume", null)
+        if (code != 200 || body == null) return null
+        return runCatching { JSONObject(body).let { Volume(it.getBoolean("muted"), it.getInt("current")) } }.getOrNull()
+    }
+
+    fun setMuted(muted: Boolean, current: Int) =
+        post("/6/audio/volume", """{"muted":$muted,"current":$current}""")
+
     /** Returns the HTTP status, or -1 if the TV could not be reached. */
+    fun post(path: String, body: String): Int = request("POST", path, body).first
+
     @Synchronized
-    fun post(path: String, body: String): Int {
+    private fun request(method: String, path: String, body: String?): Pair<Int, String?> {
         for (attempt in 1..3) {
             try {
                 val c = URL("https://$host:1926$path").openConnection() as HttpsURLConnection
                 c.sslSocketFactory = ssl
                 c.setHostnameVerifier { _, _ -> true }
                 c.connectTimeout = 3000; c.readTimeout = 5000
-                c.requestMethod = "POST"; c.doOutput = true
-                c.setRequestProperty("Content-Type", "application/json")
-                authHeader(path)?.let { c.setRequestProperty("Authorization", it) }
-                c.outputStream.use { it.write(body.toByteArray()) }
+                c.requestMethod = method
+                authHeader(method, path)?.let { c.setRequestProperty("Authorization", it) }
+                if (body != null) {
+                    c.doOutput = true
+                    c.setRequestProperty("Content-Type", "application/json")
+                    c.outputStream.use { it.write(body.toByteArray()) }
+                }
                 val code = c.responseCode
                 if (code == 401) {
                     challenge = parse(c.getHeaderField("WWW-Authenticate") ?: "")
                     c.disconnect(); continue
                 }
-                runCatching { c.inputStream.use { it.readBytes() } }
+                val text = runCatching { c.inputStream.use { String(it.readBytes()) } }.getOrNull()
                 c.disconnect()
-                return code
+                return code to text
             } catch (e: IOException) {
-                Log.w(GestureService.TAG, "JointSpace $path attempt $attempt: $e")
+                Log.w(GestureService.TAG, "JointSpace $method $path attempt $attempt: $e")
             }
         }
-        return -1
+        return -1 to null
     }
 
-    private fun authHeader(path: String): String? {
+    private fun authHeader(method: String, path: String): String? {
         val ch = challenge ?: return null
         val realm = ch["realm"] ?: ""; val nonce = ch["nonce"] ?: ""
         val qop = ch["qop"]?.split(",")?.map { it.trim() }?.firstOrNull { it == "auth" }
-        val ha1 = md5("$user:$realm:$pass"); val ha2 = md5("POST:$path")
+        val ha1 = md5("$user:$realm:$pass"); val ha2 = md5("$method:$path")
         val sb = StringBuilder("Digest username=\"$user\", realm=\"$realm\", nonce=\"$nonce\", uri=\"$path\", algorithm=MD5")
         if (qop != null) {
             nc++

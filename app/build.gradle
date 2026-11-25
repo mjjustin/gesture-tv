@@ -9,11 +9,19 @@ android {
         applicationId "app.gesturetv"
         minSdk 26
         targetSdk 34
-        versionCode 15
-        versionName "1.0"
-        ndk { abiFilters 'armeabi-v7a', 'arm64-v8a' }   // 32-bit TVs (e.g. Philips MT5895) + 64-bit TVs
+        versionCode 16
+        versionName "1.1"
     }
     androidResources { noCompress += "task" }
+    // One APK per CPU type keeps each download ~60 MB (MediaPipe + Vosk native libs are large).
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'armeabi-v7a', 'arm64-v8a'
+            universalApk false
+        }
+    }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = '17' }
 }
@@ -25,6 +33,9 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-service:2.6.2'
     // 0.10.14 is the last MediaPipe release that ships armeabi-v7a (32-bit) native libs
     implementation 'com.google.mediapipe:tasks-vision:0.10.14'
+    // Offline speech recognition for the "Jarvis" voice commands
+    implementation 'com.alphacephei:vosk-android:0.3.47'
+    implementation 'net.java.dev.jna:jna:5.13.0@aar'
 }
 
 // The MediaPipe gesture model (Apache-2.0) is downloaded at build time instead of living in git.
@@ -41,3 +52,4 @@ tasks.register('downloadModel') {
     }
 }
 preBuild.dependsOn downloadModel
+

@@ -54,6 +54,7 @@ class GestureService : LifecycleService() {
 
     companion object {
         const val TAG = "GestureTV"
+        const val ACTION_MIC_TEST = "app.gesturetv.MIC_TEST"
         @Volatile var running = false
         @Volatile var status = "stopped"
         /** Set by MainActivity while it is on screen: receives annotated camera frames. */
@@ -84,9 +85,11 @@ class GestureService : LifecycleService() {
         override fun onReceive(c: android.content.Context, i: android.content.Intent) {
             when (i.action) {
                 android.content.Intent.ACTION_SCREEN_OFF -> {
+                    screenOn = false
                     cameraProvider?.unbindAll(); camera = null; event("screen off: camera stopped")
                 }
-                android.content.Intent.ACTION_SCREEN_ON -> { event("screen on: camera started"); startCamera() }
+                android.content.Intent.ACTION_SCREEN_ON -> {
+                    screenOn = true; event("screen on: camera started"); startCamera() }
             }
         }
     }
@@ -129,12 +132,28 @@ class GestureService : LifecycleService() {
             recognizer = createRecognizer()
             main.post { startCamera() }
         }
+        startVoice()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        super.onStartCommand(intent, flags, startId)
+        if (intent?.action == ACTION_MIC_TEST) {
+            val secs = intent.getIntExtra("seconds", 10).coerceIn(1, 60)
+            Thread {
+                val r = runCatching { MicTest.run(this, secs) }.getOrElse { "mic test failed: $it" }
+                File(getExternalFilesDir(null), "mic_test.txt").writeText(r)
+                event(r)
+            }.start()
+        }
+        return START_STICKY
     }
 
     override fun onDestroy() {
         running = false; status = "stopped"
         runCatching { unregisterReceiver(screenReceiver) }
         main.removeCallbacksAndMessages(null)
+        voice?.stop()
+        if (wantDuckPrev) { wantDuckPrev = false; duck(false) }
         analysisExec.execute { recognizer?.close(); recognizer = null }
         analysisExec.shutdown(); netExec.shutdown(); logExec.shutdown()
         val wm = getSystemService(WindowManager::class.java)
@@ -149,7 +168,7 @@ class GestureService : LifecycleService() {
             .setContentTitle("GestureTV is watching for gestures")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .build()
-        if (Build.VERSION.SDK_INT >= 29) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA)
+        if (Build.VERSION.SDK_INT >= 29) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
         else startForeground(1, n)
     }
 
@@ -374,9 +393,10 @@ class GestureService : LifecycleService() {
             showFlash("$label – needs TV pairing", 1500); return
         }
         showFlash(label, 1200)
+        if (a == Action.VOL_UP || a == Action.VOL_DOWN || a == Action.MUTE) unduckForVolumeChange()
         when (a) {
-            Action.APP2 -> { launch(cfg.twoFingers.pkg); return }
-            Action.APP3 -> { launch(cfg.threeFingers.pkg); return }
+            Action.APP2 -> { onAppOpened(cfg.twoFingers.pkg); launch(cfg.twoFingers.pkg); return }
+            Action.APP3 -> { onAppOpened(cfg.threeFingers.pkg); launch(cfg.threeFingers.pkg); return }
             else -> {}
         }
         if (j == null) {          // fallbacks that work on any Android TV
@@ -385,6 +405,7 @@ class GestureService : LifecycleService() {
                 Action.VOL_UP -> am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
                 Action.VOL_DOWN -> am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
                 Action.MUTE -> am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_TOGGLE_MUTE, AudioManager.FLAG_SHOW_UI)
+                Action.PAUSE, Action.PLAY -> mediaKey(a)
                 Action.HOME -> startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 else -> {}
             }
@@ -402,9 +423,155 @@ class GestureService : LifecycleService() {
                 Action.OK -> j.key("Confirm")
                 Action.BACK -> j.key("Back")
                 Action.HOME -> j.key("Home")
+                Action.PAUSE, Action.PLAY -> { mediaKey(a); 0 }
                 else -> 0
             }
             event("${a.name} -> HTTP $code")
+        }
+    }
+
+    /** Play/pause through Android's media session, so it works on any TV and with any player app. */
+    private fun mediaKey(a: Action) {
+        val code = if (a == Action.PAUSE) android.view.KeyEvent.KEYCODE_MEDIA_PAUSE else android.view.KeyEvent.KEYCODE_MEDIA_PLAY
+        val am = getSystemService(AudioManager::class.java)
+        am.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, code))
+        am.dispatchMediaKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, code))
+    }
+
+    // ---- voice: "Jarvis" (or palm up) + command ----
+
+    private var voice: VoiceControl? = null
+    @Volatile private var screenOn = true
+
+    private fun voicePhrases(): Map<String, String> {
+        val n = mapOf(1 to "one", 2 to "two", 3 to "three", 4 to "four", 5 to "five", 10 to "ten", 15 to "fifteen", 20 to "twenty")
+        val m = linkedMapOf(
+            "volume up" to "VOL_UP", "louder" to "VOL_UP", "volume down" to "VOL_DOWN", "quieter" to "VOL_DOWN",
+            "mute" to "MUTE_ON", "unmute" to "MUTE_OFF",
+            "pause" to "PAUSE", "play" to "PLAY", "resume" to "PLAY",
+            "go home" to "HOME", "home" to "HOME", "go back" to "BACK", "back" to "BACK",
+            "left" to "LEFT", "right" to "RIGHT", "up" to "UP", "down" to "DOWN", "ok" to "OK", "select" to "OK",
+            "open" to "OK", "enter" to "OK", "click" to "OK", "open it" to "OK",
+            "thank you" to VoiceControl.END, "thanks" to VoiceControl.END, "stop listening" to VoiceControl.END,
+            "start timer" to "TIMER_START", "cancel timer" to "TIMER_CANCEL", "stop timer" to "TIMER_CANCEL",
+        )
+        n[cfg.timerMinutes]?.let { m["$it minutes left"] = "TIMER_START" }
+        for ((sc, id) in listOf(cfg.twoFingers to "APP2", cfg.threeFingers to "APP3")) {
+            m["open ${sc.spoken}"] = id; m[sc.spoken] = id
+        }
+        return m
+    }
+
+    private fun startVoice() {
+        if (cfg.wakeWord == "off" && !cfg.voiceWithPalm) return
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            event("voice off: no microphone permission"); return
+        }
+        Thread {
+            val dir = VoskModel.prepare(this) { event(it) }
+            if (dir == null) { event("voice off: voice model not available (no internet on first start?)"); return@Thread }
+            val v = VoiceControl(this, dir, voicePhrases(), cfg.listenMs,
+                wakeEnabled = { screenOn && (cfg.wakeWord == "always" || (cfg.wakeWord == "dark" && brightness < 45)) },
+                commandMode = { screenOn && palmVoice(SystemClock.uptimeMillis()) },
+                listener = object : VoiceControl.Listener {
+                    override fun onWake() = main.post { event("voice: wake"); main.post(uiTick) }.let { }
+                    override fun onCommand(id: String, heard: String) = main.post { voiceCommand(id, heard) }.let { }
+                    override fun onListenEnd(gotCommand: Boolean) = main.post { if (!gotCommand) event("voice: no command") }.let { }
+                    override fun log(msg: String) = event(msg)
+                })
+            voice = v
+            v.start()
+        }.start()
+    }
+
+    private fun voiceCommand(id: String, heard: String) {
+        event("voice: \"$heard\" -> $id")
+        when (id) {
+            "MUTE_ON" -> { setMute(true); showFlash("🎤 🔇 Mute", 1500); return }
+            "MUTE_OFF" -> { setMute(false); showFlash("🎤 🔊 Unmute", 1500); return }
+            "TIMER_START" -> { if (timerEnd == 0L && !timeUp) toggleTimer(); return }
+            "TIMER_CANCEL" -> { if (timerEnd != 0L || timeUp) toggleTimer(); return }
+        }
+        val a = runCatching { Action.valueOf(id) }.getOrNull() ?: return
+        val times = if (a == Action.VOL_UP || a == Action.VOL_DOWN) cfg.volumeSteps else 1
+        repeat(times) { onAction(a) }
+        flash = "🎤 " + (flash ?: ""); main.post(uiTick)
+    }
+
+    // ---- turning the TV down while listening ("ducking") ----
+    // All volume state lives on netExec, so changes happen in order.
+
+    private var ducked = false            // netExec
+    private var origVolume = -1           // netExec: level to restore
+    private var origMuted = false         // netExec
+    /** Set when the user changes the volume while ducked: stop ducking until listening ends. */
+    /** armedAt of the palm session whose voice was closed because an app opened. */
+    @Volatile private var palmVoiceClosedFor = -1L
+
+    /** Palm up = voice commands too, until an app is opened (raise the palm again for more). */
+    private fun palmVoice(now: Long) =
+        cfg.voiceWithPalm && engine.armed(now) && engine.armedAt != palmVoiceClosedFor
+
+    /** An app other than the launcher came to the front: stop listening so its sound can't trigger commands. */
+    private fun onAppOpened(pkg: String) {
+        val v = voice ?: return
+        val palm = palmVoice(SystemClock.uptimeMillis())
+        if (!v.listening && !palm) return
+        v.finish()
+        palmVoiceClosedFor = engine.armedAt
+        event("voice: closed, $pkg opened")
+    }
+
+    @Volatile private var duckSuppressed = false
+    @Volatile private var wantDuckPrev = false
+
+    /** Called from the UI tick: duck while "Jarvis" is listening or (palm up + voice). */
+    private fun updateDuck(now: Long) {
+        val listeningNow = voice?.listening == true || (voice != null && palmVoice(now))
+        if (!listeningNow) duckSuppressed = false
+        val want = listeningNow && !duckSuppressed && cfg.duckPercent < 100
+        if (want != wantDuckPrev) { wantDuckPrev = want; duck(want) }
+    }
+
+    private fun duck(on: Boolean) {
+        val j = js
+        netExec.execute {
+            if (on == ducked) return@execute
+            if (on) {
+                if (j != null) {
+                    val v = j.getVolume() ?: return@execute
+                    origVolume = v.current; origMuted = v.muted
+                    if (!v.muted) j.setMuted(false, v.current * cfg.duckPercent / 100)
+                } else {
+                    val am = getSystemService(AudioManager::class.java)
+                    origVolume = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+                    am.setStreamVolume(AudioManager.STREAM_MUSIC, origVolume * cfg.duckPercent / 100, 0)
+                }
+                ducked = true
+                event("volume lowered for listening ($origVolume → ${origVolume * cfg.duckPercent / 100})")
+            } else {
+                if (j != null) j.setMuted(origMuted, origVolume)
+                else getSystemService(AudioManager::class.java).setStreamVolume(AudioManager.STREAM_MUSIC, origVolume, 0)
+                ducked = false
+                event("volume restored ($origVolume)")
+            }
+        }
+    }
+
+    /** Before a volume/mute change: restore the normal level first, and don't duck again this round. */
+    private fun unduckForVolumeChange() {
+        if (!wantDuckPrev) return
+        duckSuppressed = true; wantDuckPrev = false
+        duck(false)
+    }
+
+    private fun setMute(m: Boolean) {
+        unduckForVolumeChange()
+        val j = js
+        netExec.execute {
+            if (j != null) j.getVolume()?.let { if (it.muted != m) j.setMuted(m, it.current) }
+            else getSystemService(AudioManager::class.java)
+                .adjustStreamVolume(AudioManager.STREAM_MUSIC, if (m) AudioManager.ADJUST_MUTE else AudioManager.ADJUST_UNMUTE, AudioManager.FLAG_SHOW_UI)
         }
     }
 
@@ -466,6 +633,7 @@ class GestureService : LifecycleService() {
             val now = SystemClock.uptimeMillis()
             if (ticks++ % 8 == 0) pollForeground()
             val armedNow = engine.armed(now)
+            updateDuck(now)
             if (armedNow != wasArmed) { wasArmed = armedNow; event(if (armedNow) "gestures ON" else "gestures off") }
 
             // Small icon: hidden unless gestures are on, an action just happened, or we're on the home screen.
@@ -473,7 +641,8 @@ class GestureService : LifecycleService() {
                 val f = flash
                 when {
                     f != null && now < flashUntil -> p.style(f, GREEN, 20f)
-                    engine.armed(now) -> p.style("✋", GREEN, 16f)
+                    voice?.listening == true -> p.style("🎤 listening…", GREEN, 18f)
+                    engine.armed(now) -> p.style(if (voice != null && cfg.voiceWithPalm) "✋ 🎤" else "✋", GREEN, 16f)
                     foreground == homePkg -> p.style("✋", DIM, 16f)
                     else -> p.visibility = View.GONE
                 }
@@ -518,7 +687,11 @@ class GestureService : LifecycleService() {
             val e = UsageEvents.Event()
             while (ev.hasNextEvent()) {
                 ev.getNextEvent(e)
-                if (e.eventType == UsageEvents.Event.ACTIVITY_RESUMED) foreground = e.packageName
+                if (e.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
+                    val p = e.packageName
+                    if (p != foreground && p != homePkg && p != packageName) onAppOpened(p)
+                    foreground = p
+                }
             }
             eventsSince = now
         } catch (t: Throwable) { /* no permission: treat as "not home" */ }

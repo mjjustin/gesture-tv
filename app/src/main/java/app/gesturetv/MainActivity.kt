@@ -14,6 +14,7 @@ import android.widget.Button
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import java.io.File
 
 /**
  * Start/stop screen with a live camera view. Gesture detection itself runs in GestureService,
@@ -47,6 +48,9 @@ class MainActivity : Activity() {
                 👎  Thumbs down (hold 1 s) → mute / unmute
                 ☝  1 finger → Home     ✌  2 fingers → ${c.twoFingers.name}     3 fingers → ${c.threeFingers.name}
                 👍  Thumbs up (hold 2 s) → kids' ${c.timerMinutes}-minute timer (again = cancel)
+                🎤  Say "Jarvis" (or raise your palm) → TV turns down → say: volume up · mute · pause · play ·
+                     open ${c.twoFingers.spoken} · open ${c.threeFingers.spoken} · go home · go back · left/right/up/down · ok/open · ${c.timerMinutes} minutes left
+                     Keep going: several commands in a row work ("right… right… open"); "thank you" ends
             """.trimIndent()
         }
         val right = LinearLayout(this).apply {
@@ -62,13 +66,23 @@ class MainActivity : Activity() {
             addView(right, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         })
         start.requestFocus()
-        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.CAMERA), 1)
+        intent.getIntExtra("mic_test", 0).takeIf { it > 0 }?.let { secs ->
+            info.text = "🎤 Recording ${secs} s from the webcam mic… speak now"
+            Thread {
+                val r = runCatching { MicTest.run(this, secs) }.getOrElse { "mic test failed: $it" }
+                File(getExternalFilesDir(null), "mic_test.txt").writeText(r)
+                runOnUiThread { info.text = r }
+            }.start()
+        }
+        val missing = arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+            .filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (missing.isNotEmpty()) {
+            requestPermissions(missing.toTypedArray(), 1)
         } else if (!GestureService.running) startIt()
     }
 
     override fun onRequestPermissionsResult(rc: Int, p: Array<out String>, r: IntArray) {
-        if (r.firstOrNull() == PackageManager.PERMISSION_GRANTED) startIt()
+        startIt()   // camera is required; without the mic, voice commands are simply off
     }
 
     private fun startIt() {

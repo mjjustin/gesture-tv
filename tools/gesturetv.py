@@ -5,6 +5,7 @@ GestureTV setup helper. Needs Python 3 and adb on your PATH.
   python3 tools/gesturetv.py --tv 192.168.1.50 check     # can this TV run it?
   python3 tools/gesturetv.py --tv 192.168.1.50 pair      # Philips only: pair with the TV (PIN on screen)
   python3 tools/gesturetv.py --tv 192.168.1.50 install   # install APK, grant permissions, push config, start
+                                                          # (picks your own build if there is one, else release/)
   python3 tools/gesturetv.py --tv 192.168.1.50 config    # push an edited config.json and restart the app
   python3 tools/gesturetv.py --tv 192.168.1.50 log       # show the app's event log
   python3 tools/gesturetv.py --tv 192.168.1.50 uninstall
@@ -15,7 +16,9 @@ PKG = "app.gesturetv"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG = os.path.join(ROOT, "config.json")
 EXAMPLE = os.path.join(ROOT, "config.example.json")
-DEFAULT_APK = os.path.join(ROOT, "app", "build", "outputs", "apk", "debug", "app-debug.apk")
+VERSION = "1.1"
+BUILD_DIR = os.path.join(ROOT, "app", "build", "outputs", "apk", "debug")
+RELEASE_DIR = os.path.join(ROOT, "release")
 REMOTE_DIR = f"/sdcard/Android/data/{PKG}/files"
 
 # Shared secret every Philips JointSpace client uses to sign the pairing PIN
@@ -124,17 +127,33 @@ def restart(s):
     adb(s, "shell", "am", "start", "-n", f"{PKG}/.MainActivity")
 
 
+def pick_apk(s):
+    """The APK matching the TV's CPU: your own build if present, otherwise the ready-made one in release/."""
+    abis = adb(s, "shell", "getprop", "ro.product.cpu.abilist", capture=True).strip().split(",")
+    # Most TVs run 32-bit apps even on 64-bit chips; the 32-bit APK works on both.
+    for abi in [a for a in ("armeabi-v7a", "arm64-v8a") if a in abis]:
+        for path in (os.path.join(BUILD_DIR, f"app-{abi}-debug.apk"),
+                     os.path.join(RELEASE_DIR, f"GestureTV-{VERSION}-{abi}.apk")):
+            if os.path.exists(path):
+                return path
+    sys.exit(f"No APK found for this TV (CPU: {','.join(abis)}). Build one with ./gradlew assembleDebug")
+
+
 def cmd_install(tv, apk):
     s = connect(tv)
+    apk = apk or pick_apk(s)
     if not os.path.exists(apk):
         sys.exit(f"APK not found: {apk}\nBuild it first: ./gradlew assembleDebug")
+    print(f"Installing {os.path.relpath(apk, ROOT)}")
     adb(s, "install", "-r", apk)
     adb(s, "shell", "pm", "grant", PKG, "android.permission.CAMERA")
+    adb(s, "shell", "pm", "grant", PKG, "android.permission.RECORD_AUDIO")    # "Jarvis" voice commands
     adb(s, "shell", "appops", "set", PKG, "SYSTEM_ALERT_WINDOW", "allow")   # status icon + messages + app shortcuts
     adb(s, "shell", "appops", "set", PKG, "GET_USAGE_STATS", "allow")       # show ✋ icon only on the home screen
     push_config(s)
     restart(s)
-    print("Installed and started. Hold an open palm in front of the camera for 1 s to begin.")
+    print("Installed and started. Hold an open palm in front of the camera for 1 s to begin.\n"
+          "The first start downloads the voice model (~40 MB), so 'Jarvis' works a minute later.")
 
 
 def cmd_config(tv):
@@ -158,7 +177,7 @@ def cmd_uninstall(tv):
 def main():
     ap = argparse.ArgumentParser(description="GestureTV setup helper")
     ap.add_argument("--tv", required=True, help="TV IP address, e.g. 192.168.1.50")
-    ap.add_argument("--apk", default=DEFAULT_APK, help="APK to install (default: the debug build)")
+    ap.add_argument("--apk", help="APK to install (default: picked automatically for the TV's CPU)")
     ap.add_argument("command", choices=["check", "pair", "install", "config", "log", "uninstall"])
     a = ap.parse_args()
     {"check": lambda: cmd_check(a.tv), "pair": lambda: cmd_pair(a.tv),

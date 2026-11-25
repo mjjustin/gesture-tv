@@ -10,7 +10,7 @@ import java.io.File
  *   /sdcard/Android/data/app.gesturetv/files/config.json
  * (push it with `adb push`, see README). Every key is optional; missing keys use the defaults below.
  */
-data class Shortcut(val name: String, val pkg: String)
+data class Shortcut(val name: String, val pkg: String, val spoken: String = name.lowercase())
 
 data class Config(
     /** Philips JointSpace API. null = not paired: arrow keys / OK / Back are unavailable. */
@@ -30,6 +30,16 @@ data class Config(
     val timerMinutes: Int = 5,
     val timerStartMessage: String = "Only {minutes} minutes left of TV time!",
     val timerEndMessage: String = "TV time is over!\nTime to switch off 😊",
+    /** "always" = listen for "Jarvis" all the time, "dark" = only when the camera sees a dark room, "off". */
+    val wakeWord: String = "always",
+    /** How long to wait for a command after "Jarvis". */
+    val listenMs: Long = 5000,
+    /** Volume steps per "volume up" / "volume down". */
+    val volumeSteps: Int = 3,
+    /** While listening, turn the TV down to this % of its volume (0 = mute, 100 = don't change). */
+    val duckPercent: Int = 30,
+    /** Palm up also switches voice commands on (no "Jarvis" needed while gestures are on). */
+    val voiceWithPalm: Boolean = true,
 ) {
     val paired get() = !tvUser.isNullOrEmpty() && !tvPassword.isNullOrEmpty()
 
@@ -57,9 +67,11 @@ data class Config(
             val tv = j.optJSONObject("tv") ?: JSONObject()
             val sc = j.optJSONObject("shortcuts") ?: JSONObject()
             val timer = j.optJSONObject("kidsTimer") ?: JSONObject()
+            val voice = j.optJSONObject("voice") ?: JSONObject()
             fun shortcut(key: String, def: Shortcut): Shortcut {
                 val o = sc.optJSONObject(key) ?: return def
-                return Shortcut(o.optString("name", def.name), o.optString("package", def.pkg))
+                val name = o.optString("name", def.name)
+                return Shortcut(name, o.optString("package", def.pkg), o.optString("spoken", name.lowercase()))
             }
             return Config(
                 tvHost = tv.optString("host", d.tvHost),
@@ -74,6 +86,11 @@ data class Config(
                 timerMinutes = timer.optInt("minutes", d.timerMinutes),
                 timerStartMessage = timer.optString("startMessage", d.timerStartMessage),
                 timerEndMessage = timer.optString("endMessage", d.timerEndMessage),
+                wakeWord = voice.optString("wakeWord", d.wakeWord),
+                listenMs = (voice.optDouble("listenSeconds", d.listenMs / 1000.0) * 1000).toLong(),
+                volumeSteps = voice.optInt("volumeSteps", d.volumeSteps),
+                duckPercent = voice.optInt("duckPercent", d.duckPercent).coerceIn(0, 100),
+                voiceWithPalm = voice.optBoolean("withPalm", d.voiceWithPalm),
             )
         }
     }
